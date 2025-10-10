@@ -16,6 +16,7 @@ public class ItemDragHandler : MonoBehaviour, IBeginDragHandler, IDragHandler, I
     // Start is called before the first frame update
     void Start()
     {
+        //
         canvasGroup = GetComponent<CanvasGroup>();
         Debug.Log($"ItemDragHandler initialized on {gameObject.name}");
         inventoryController = InventoryController.Instance;
