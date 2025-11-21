@@ -1,0 +1,18 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c9f9e894870ac4653b81e558c9c106ae, type: 3}
+  m_Name: ShatteredBones
+  m_EditorClassIdentifier: Assembly-CSharp::ItemPreset
+  itemID: 5dfa7485f99bf452cae4fd8c7077c69b
+  itemName: ShatteredBones
+  prefab: {fileID: 3755434433543023435, guid: 0e3e550bb885243829b09e02fb4bf8e1, type: 3}
+  icon: {fileID: -2016813695, guid: d89731c4c358345e18e3c28e3e2c7e5c, type: 3}

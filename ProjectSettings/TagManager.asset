@@ -5,6 +5,9 @@ TagManager:
   serializedVersion: 3
   tags:
   - Item
+  - InventoryPanel
+  - InventoryPage
+  - Enemy
   layers:
   - Default
   - TransparentFX

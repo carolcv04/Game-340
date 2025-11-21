@@ -1,0 +1,18 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c9f9e894870ac4653b81e558c9c106ae, type: 3}
+  m_Name: SmallBones
+  m_EditorClassIdentifier: Assembly-CSharp::ItemPreset
+  itemID: 132c28a4a15f44b3183bd706e9a2f814
+  itemName: SmallBones
+  prefab: {fileID: 3755434433543023435, guid: c518f98bb811e4bdab9bc4c848dafafd, type: 3}
+  icon: {fileID: 500390818, guid: d89731c4c358345e18e3c28e3e2c7e5c, type: 3}
