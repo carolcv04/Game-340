@@ -1,8 +1,11 @@
 using System;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class TutorialUI : MonoBehaviour
 { 
+    [SerializeField] private Button startButton; // Add a button reference if you have one
+    
     private void Start()
     {
         if (GameInput.Instance != null)
@@ -15,6 +18,16 @@ public class TutorialUI : MonoBehaviour
             FountainGameManager.Instance.OnStateChanged += FountainGameManager_OnStateChanged;
             FountainGameManager.Instance.OnLocalPlayerReadyChanged += FountainGameManager_OnLocalPlayerReadyChanged;
         }
+        else
+        {
+            Debug.LogWarning("[TutorialUI] FountainGameManager.Instance is null at Start!");
+        }
+
+        // Add button listener if you have a button
+        if (startButton != null)
+        {
+            startButton.onClick.AddListener(OnStartButtonClicked);
+        }
 
         UpdateDisplay();
         Show();
@@ -22,7 +35,6 @@ public class TutorialUI : MonoBehaviour
 
     private void OnDestroy()
     {
-        // Unsubscribe to prevent memory leaks
         if (GameInput.Instance != null)
         {
             GameInput.Instance.OnBindingRebind -= GameInput_OnBindingRebind;
@@ -33,6 +45,11 @@ public class TutorialUI : MonoBehaviour
             FountainGameManager.Instance.OnStateChanged -= FountainGameManager_OnStateChanged;
             FountainGameManager.Instance.OnLocalPlayerReadyChanged -= FountainGameManager_OnLocalPlayerReadyChanged;
         }
+        
+        if (startButton != null)
+        {
+            startButton.onClick.RemoveListener(OnStartButtonClicked);
+        }
     }
 
     private void GameInput_OnBindingRebind(object sender, EventArgs e)
@@ -42,14 +59,13 @@ public class TutorialUI : MonoBehaviour
 
     private void UpdateDisplay()
     {
-        // TODO: Update your tutorial text/UI elements
-        // Example: tutorialText.text = GameInput.Instance.GetBindingText(GameInput.Binding.Interact);
-        // For now, empty to prevent crashes
+        // TODO: Update tutorial text
     }
 
     private void FountainGameManager_OnLocalPlayerReadyChanged(object sender, EventArgs e)
     {
-        if (FountainGameManager.Instance.IsLocalPlayerReady())
+        Debug.Log("[TutorialUI] Local player ready changed");
+        if (FountainGameManager.Instance != null && FountainGameManager.Instance.IsLocalPlayerReady())
         {
             Hide();
         }
@@ -57,6 +73,10 @@ public class TutorialUI : MonoBehaviour
 
     private void FountainGameManager_OnStateChanged(object sender, EventArgs e)
     {
+        Debug.Log($"[TutorialUI] State changed");
+        
+        if (FountainGameManager.Instance == null) return;
+        
         // Hide tutorial when game starts
         if (FountainGameManager.Instance.IsCountdownToStartActive() || 
             FountainGameManager.Instance.IsGamePlaying())
@@ -65,12 +85,29 @@ public class TutorialUI : MonoBehaviour
         }
     }
 
+    // If you have a button, this gets called
+    private void OnStartButtonClicked()
+    {
+        Debug.Log("[TutorialUI] Start button clicked");
+        ExitPanel();
+    }
+
     public void ExitPanel()
     {
-        // Trigger the state change
-        if (FountainGameManager.Instance.IsWaitingToStart())
+        Debug.Log("[TutorialUI] ExitPanel called");
+        
+        // Direct approach - just start the game
+        if (FountainGameManager.Instance != null)
         {
-            FountainGameManager.Instance.StartCountdown();
+            if (FountainGameManager.Instance.IsWaitingToStart())
+            {
+                Debug.Log("[TutorialUI] Calling StartCountdown");
+                FountainGameManager.Instance.StartCountdown();
+            }
+        }
+        else
+        {
+            Debug.LogError("[TutorialUI] FountainGameManager.Instance is null!");
         }
 
         Hide();
@@ -78,11 +115,13 @@ public class TutorialUI : MonoBehaviour
     
     private void Show()
     {
+        Debug.Log("[TutorialUI] Showing tutorial");
         gameObject.SetActive(true);
     }
     
     private void Hide()
     {
+        Debug.Log("[TutorialUI] Hiding tutorial");
         gameObject.SetActive(false);
     }
 }

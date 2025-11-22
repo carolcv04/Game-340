@@ -1,15 +1,24 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 
-public class FountainGameManager : NetworkBehaviour {
+public class FountainGameManager : NetworkBehaviour
+{
     public static FountainGameManager Instance { get; private set; }
+    
+    [field: Header("Events")]
     public event EventHandler OnStateChanged;
-    public event EventHandler OnGamePaused;
-    public event EventHandler OnGameUnpaused;
     public event EventHandler OnLocalPlayerReadyChanged;
-    private PlayerStats currentPlayer;
+    
+    [Header("Player Spawning (Offline Mode)")]
+    [SerializeField] private GameObject offlinePlayerPrefab;
+    [SerializeField] private Vector2 offlineSpawnPoint = new Vector2(0, 0);
+    
+    [Header("Game Settings")]
+    [SerializeField] private float countdownDuration = 3f;
+    [SerializeField] private float gameDuration = 180f; // 3 minutes
     
     private enum State
     {
@@ -18,258 +27,332 @@ public class FountainGameManager : NetworkBehaviour {
         GamePlaying,
         GameOver
     }
-    private NetworkVariable<State> state = new NetworkVariable<State>(State.WaitingToStart);
-    private bool isLocalPlayerReady;
-    private float countdownToStartTimer = 3f;
-    private float countdownToStartTimerMax = 3f;
-    private bool isFountainClaimed;
-    private float turnPlayingTimer;
-    private float turnPlayingTimerMax = 60f;
-    private int currentPlayerIndex = 0;
-    private int totalPlayers;
     
-    //TEMP FOR TESTING
-    private PlayerStats playerStatsForThisTurn;
+    public enum GameEndReason
+    {
+        None,
+        PlayerDied,
+        TimeExpired,
+        StreetCompleted
+    }
+    
+    private NetworkVariable<State> state = new NetworkVariable<State>(State.WaitingToStart);
+    private NetworkVariable<GameEndReason> gameEndReason = new NetworkVariable<GameEndReason>(GameEndReason.None);
+    
+    private bool isLocalPlayerReady;
+    private float countdownTimer;
+    private float gameTimer;
+    private bool isStreetCompleted;
+    
+    private PlayerStats currentPlayer;
     private Dictionary<ulong, bool> playerReadyDictionary;
+    
+    // Getters
+    public GameEndReason GetGameEndReason() => gameEndReason.Value;
+    public bool IsGamePlaying() => state.Value == State.GamePlaying;
+    public bool IsGameOver() => state.Value == State.GameOver;
+    public bool IsCountdownToStartActive() => state.Value == State.CountdownToStart;
+    public bool IsWaitingToStart() => state.Value == State.WaitingToStart;
+    public bool IsLocalPlayerReady() => isLocalPlayerReady;
+    public float GetCountdownToStartTimer() => countdownTimer;
+    public float GetGamePlayingTimerNormalized() => 1 - (gameTimer / gameDuration);
     
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        
         Instance = this;
         playerReadyDictionary = new Dictionary<ulong, bool>();
-        
-        //TEMP FOR TESTING
-        var manager = FindObjectOfType<FountainGameManager>();
-        manager.SetCurrentPlayer(playerStatsForThisTurn);
     }
 
     private void Start()
     {
-        GameInput.Instance.OnPauseAction += GameInput_OnPauseAction;
-        GameInput.Instance.OnInteractAction += GameInput_OnInteractAction;
+        if (GameInput.Instance != null)
+        {
+            GameInput.Instance.OnInteractAction += GameInput_OnInteractAction;
+        }
     }
 
     public override void OnNetworkSpawn()
     {
+        base.OnNetworkSpawn();
         state.OnValueChanged += State_OnValueChanged;
         
-        if (IsServer)
-        {
-            totalPlayers = NetworkManager.Singleton.ConnectedClientsIds.Count;
-            Debug.Log($"[FountainGameManager] Total players initialized: {totalPlayers}");
-        }
+        Debug.Log($"[FountainGameManager] OnNetworkSpawn - IsServer: {IsServer}, IsSpawned: {IsSpawned}");
     }
 
     private void State_OnValueChanged(State previousValue, State newValue)
     {
-        Debug.Log($"[FountainGameManager] State changed from {previousValue} to {newValue}");
+        Debug.Log($"[FountainGameManager] State: {previousValue} → {newValue}");
         OnStateChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void GameInput_OnPauseAction(object sender, EventArgs e)
+    private void Update()
     {
-        TogglePauseGame();
+        // Only server/host updates game state
+        if (!IsServer) return;
+        
+        switch (state.Value)
+        {
+            case State.WaitingToStart:
+                // Idle state - waiting for player to press start
+                break;
+            
+            case State.CountdownToStart:
+                countdownTimer -= Time.deltaTime;
+                if (countdownTimer <= 0f)
+                {
+                    Debug.Log("[FountainGameManager] Countdown finished, starting game!");
+                    
+                    // Spawn player in offline mode
+                    SpawnOfflinePlayer();
+                    
+                    gameTimer = gameDuration;
+                    state.Value = State.GamePlaying;
+                    
+                    // ✅ Play game music if not already playing
+                    if (AudioManager.Instance != null && AudioManager.Instance.gameMusic != null)
+                    {
+                        AudioManager.Instance.PlayBGM(AudioManager.Instance.gameMusic);
+                    }
+                }
+                break;
+                
+            case State.GamePlaying:
+                // Check win condition
+                if (isStreetCompleted)
+                {
+                    EndGame(GameEndReason.StreetCompleted);
+                    break;
+                }
+                
+                // Check time limit
+                gameTimer -= Time.deltaTime;
+                if (gameTimer <= 0f)
+                {
+                    EndGame(GameEndReason.TimeExpired);
+                }
+                break;
+                
+            case State.GameOver:
+                // Game ended - do nothing
+                break;
+        }
     }
 
-    private void TogglePauseGame()
+    private void GameInput_OnInteractAction(object sender, EventArgs e)
     {
-        //TODO
-        //Pause game here 
+        // Only respond to interact in waiting state
+        if (state.Value != State.WaitingToStart) return;
+        
+        Debug.Log("[FountainGameManager] Player pressed interact to start");
+        
+        isLocalPlayerReady = true;
+        OnLocalPlayerReadyChanged?.Invoke(this, EventArgs.Empty);
+        
+        // In offline mode or as server, start immediately
+        if (IsServer || !IsSpawned)
+        {
+            StartCountdown();
+        }
+        else
+        {
+            // Client in multiplayer - request from server
+            SetPlayerReadyServerRpc();
+        }
+    }
+
+    public void StartCountdown()
+    {
+        if (!IsServer)
+        {
+            Debug.LogWarning("[FountainGameManager] Only server can start countdown");
+            return;
+        }
+    
+        if (state.Value != State.WaitingToStart)
+        {
+            Debug.LogWarning($"[FountainGameManager] Cannot start countdown from state: {state.Value}");
+            return;
+        }
+    
+        Debug.Log("[FountainGameManager] Starting countdown");
+        countdownTimer = countdownDuration;
+        state.Value = State.CountdownToStart;
+    
+        // ✅ Play game music when countdown starts
+        if (AudioManager.Instance != null && AudioManager.Instance.gameMusic != null)
+        {
+            AudioManager.Instance.PlayBGM(AudioManager.Instance.gameMusic);
+        }
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void SetPlayerReadyServerRpc(ServerRpcParams serverRpcParams = default)
+    {
+        ulong clientId = serverRpcParams.Receive.SenderClientId;
+        Debug.Log($"[Server] Client {clientId} is ready");
+
+        playerReadyDictionary[clientId] = true;
+
+        // Check if all players are ready
+        int connectedCount = NetworkManager.Singleton.ConnectedClientsIds.Count;
+        
+        // Single player - start immediately
+        if (connectedCount == 1)
+        {
+            StartCountdown();
+            return;
+        }
+
+        // Multiplayer - wait for all players
+        bool allReady = true;
+        foreach (ulong id in NetworkManager.Singleton.ConnectedClientsIds)
+        {
+            if (!playerReadyDictionary.ContainsKey(id) || !playerReadyDictionary[id])
+            {
+                allReady = false;
+                break;
+            }
+        }
+
+        if (allReady)
+        {
+            Debug.Log("[Server] All players ready, starting countdown");
+            StartCountdown();
+        }
     }
     
-    public void SetCurrentPlayer(PlayerStats player)
+    // Add this to FountainGameManager.cs
+
+    public void RestartGame()
     {
-        // Unsubscribe from old player if needed
+        if (!IsServer) return;
+    
+        Debug.Log("[FountainGameManager] Restarting game...");
+    
+        // Reset game state
+        gameEndReason.Value = GameEndReason.None;
+        isStreetCompleted = false;
+        isLocalPlayerReady = false;
+        playerReadyDictionary.Clear();
+    
+        // Destroy current player if exists
         if (currentPlayer != null)
         {
-            currentPlayer.OnPlayerDied -= HandleCurrentPlayerDeath;
+            var playerNetObj = currentPlayer.GetComponent<NetworkObject>();
+            if (playerNetObj != null && playerNetObj.IsSpawned)
+            {
+                playerNetObj.Despawn(true);
+            }
+            currentPlayer = null;
+        }
+    
+        // Reset building states (if needed)
+        if (BuildingManager.Instance != null)
+        {
+            // You'd need to add a ResetBuildings() method to BuildingManager
+            // For now, buildings will stay built
+        }
+    
+        // Start countdown again
+        countdownTimer = countdownDuration;
+        state.Value = State.CountdownToStart;
+    
+        // Play game music
+        if (AudioManager.Instance != null && AudioManager.Instance.gameMusic != null)
+        {
+            AudioManager.Instance.PlayBGM(AudioManager.Instance.gameMusic);
+        }
+    }
+
+    private void SpawnOfflinePlayer()
+    {
+        if (offlinePlayerPrefab == null)
+        {
+            Debug.LogError("[FountainGameManager] offlinePlayerPrefab not assigned!");
+            return;
+        }
+
+        Vector3 spawnPosition = new Vector3(offlineSpawnPoint.x, offlineSpawnPoint.y, 0f);
+        GameObject playerObj = Instantiate(offlinePlayerPrefab, spawnPosition, Quaternion.identity);
+        
+        var networkObject = playerObj.GetComponent<NetworkObject>();
+        if (networkObject != null)
+        {
+            networkObject.SpawnAsPlayerObject(NetworkManager.ServerClientId);
+            Debug.Log("[FountainGameManager] Player spawned at " + spawnPosition);
+            
+            // Set as current player for death tracking
+            var playerStats = playerObj.GetComponent<PlayerStats>();
+            if (playerStats != null)
+            {
+                SetCurrentPlayer(playerStats);
+            }
+        }
+    }
+
+    public void SetCurrentPlayer(PlayerStats player)
+    {
+        if (currentPlayer != null)
+        {
+            currentPlayer.OnPlayerDied -= HandlePlayerDeath;
         }
 
         currentPlayer = player;
 
         if (currentPlayer != null)
         {
-            currentPlayer.OnPlayerDied += HandleCurrentPlayerDeath;
+            currentPlayer.OnPlayerDied += HandlePlayerDeath;
+            Debug.Log("[FountainGameManager] Current player set");
         }
     }
-    
-    private void HandleCurrentPlayerDeath(PlayerStats deadPlayer)
+
+    private void HandlePlayerDeath(PlayerStats deadPlayer)
     {
-        Debug.Log($"Current player {deadPlayer.OwnerClientId} died!");
+        if (!IsServer) return;
+        
+        Debug.Log($"[FountainGameManager] Player {deadPlayer.OwnerClientId} died!");
+        EndGame(GameEndReason.PlayerDied);
+    }
+
+    public void SetStreetCompleted(bool completed)
+    {
+        if (!IsServer) return;
+        
+        isStreetCompleted = completed;
+        Debug.Log($"[FountainGameManager] Street completed: {completed}");
+    }
+
+    private void EndGame(GameEndReason reason)
+    {
+        if (state.Value == State.GameOver) return; // Already ended
+        
+        Debug.Log($"[FountainGameManager] Game Over - Reason: {reason}");
+        
+        gameEndReason.Value = reason;
         state.Value = State.GameOver;
-    }
-
-    private void Update()
-    {
-        if (!IsServer) { return; }
         
-        switch (state.Value)
+        if (AudioManager.Instance != null)
         {
-            case State.WaitingToStart:
-                SoundEffectManager.Play("MainMenu", true);
-                break;
-            
-            case State.CountdownToStart:
-                SoundEffectManager.Play("MainMenu", false);
+            AudioManager.Instance.StopBGM();
+        }
+    }
 
-                countdownToStartTimer -= Time.deltaTime;
-                if (countdownToStartTimer <= 0f)
-                {
-                    Debug.Log("[FountainGameManager] Countdown finished, starting game!");
-                    turnPlayingTimer = turnPlayingTimerMax;
-                    state.Value = State.GamePlaying;
-                }
-                break;
-                
-            case State.GamePlaying:
-                SoundEffectManager.Play("Overworld", true);
-
-                if (isFountainClaimed)
-                {
-                    Debug.Log("[FountainGameManager] Fountain claimed, game over!");
-                    state.Value = State.GameOver;
-                }
-                else
-                {
-                    // Check both death and timer
-                    bool shouldEndTurn = IsCurrentPlayerDead() || turnPlayingTimer <= 0f;
+    private void OnDestroy()
+    {
+        if (GameInput.Instance != null)
+        {
+            GameInput.Instance.OnInteractAction -= GameInput_OnInteractAction;
+        }
         
-                    if (!IsCurrentPlayerDead())
-                    {
-                        turnPlayingTimer -= Time.deltaTime;
-                        
-                        // Log when timer is about to expire
-                        if (turnPlayingTimer <= 1f && turnPlayingTimer > 0.9f)
-                        {
-                            Debug.Log("[FountainGameManager] Turn timer almost expired!");
-                        }
-                    }
-        
-                    if (shouldEndTurn)
-                    {
-                        Debug.Log($"[FountainGameManager] Turn ended. Current player: {currentPlayerIndex}");
-                        
-                        currentPlayerIndex = (currentPlayerIndex + 1) % totalPlayers;
-                        
-                        // If we've cycled through all players, end the game
-                        if (currentPlayerIndex == 0)
-                        {
-                            Debug.Log("[FountainGameManager] All players have taken their turn, game over!");
-                            state.Value = State.GameOver;
-                        }
-                        else
-                        {
-                            turnPlayingTimer = turnPlayingTimerMax;
-                        }
-                    }
-                }
-                break;
-                
-            case State.GameOver:
-                break;
-        }
-    }
-
-    public bool IsGamePlaying()
-    {
-        return state.Value == State.GamePlaying;
-    }
-    
-    public bool IsGameOver()
-    {
-        return state.Value == State.GameOver;
-    }
-    
-    private bool IsCurrentPlayerDead()
-    {
-        if (currentPlayer == null) return false;
-        return currentPlayer.IsDead();
-    }
-    
-    public bool IsCountdownToStartActive()
-    {
-        return state.Value == State.CountdownToStart;
-    }
-    
-    public float GetCountdownToStartTimer()
-    {
-        return countdownToStartTimer;
-    }
-
-    public float GetGamePlayingTimerNormalized()
-    {
-        return 1 - (turnPlayingTimer / turnPlayingTimerMax);
-    }
-
-    private void GameInput_OnInteractAction(object sender, EventArgs e)
-    {
-        if (state.Value == State.WaitingToStart)
+        if (currentPlayer != null)
         {
-            isLocalPlayerReady = true;
-            Debug.Log("About to call ServerRpc");
-            SetPlayerReadyServerRpc();
-            OnLocalPlayerReadyChanged?.Invoke(this, EventArgs.Empty);
-            Debug.Log("After calling ServerRpc");
-        }
-    }
-    
-    public bool IsWaitingToStart()
-    {
-        return state.Value == State.WaitingToStart;
-    }
-    
-    public void StartCountdown()
-    {
-        if (state.Value == State.WaitingToStart)
-        {
-            state.Value = State.CountdownToStart;
-            OnStateChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-    
-    public bool IsLocalPlayerReady()
-    {
-        return isLocalPlayerReady;
-    }
-
-    [ServerRpc(RequireOwnership = false)]
-    private void SetPlayerReadyServerRpc(ServerRpcParams serverRpcParams = default)
-    {
-        Debug.Log("ServerRpc received!");
-        Debug.Log("Sender Client ID: " + serverRpcParams.Receive.SenderClientId);
-
-        playerReadyDictionary[serverRpcParams.Receive.SenderClientId] = true;
-
-        // Get total connected players
-        int connectedPlayersCount = NetworkManager.Singleton.ConnectedClientsIds.Count;
-        Debug.Log("Connected players count: " + connectedPlayersCount);
-
-        // If single player, immediately start countdown
-        if (connectedPlayersCount == 1)
-        {
-            Debug.Log("Single player detected - starting countdown immediately");
-            countdownToStartTimer = countdownToStartTimerMax;
-            state.Value = State.CountdownToStart;
-            return;
-        }
-
-        // For multiplayer, check if all players are ready
-        bool allClientsReady = true;
-        foreach (ulong clientId in NetworkManager.Singleton.ConnectedClientsIds)
-        {
-            if (!playerReadyDictionary.ContainsKey(clientId) || !playerReadyDictionary[clientId])
-            {
-                allClientsReady = false;
-                break;
-            }
-        }
-
-        Debug.Log("allClientsReady: " + allClientsReady);
-        Debug.Log("Total players ready: " + playerReadyDictionary.Count);
-
-        if (allClientsReady)
-        {
-            countdownToStartTimer = countdownToStartTimerMax;
-            state.Value = State.CountdownToStart;
+            currentPlayer.OnPlayerDied -= HandlePlayerDeath;
         }
     }
 }

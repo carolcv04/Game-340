@@ -13,8 +13,8 @@ MonoBehaviour:
   m_Name: Player1
   m_EditorClassIdentifier: Assembly-CSharp::PlayerData
   characterName: Player One
-  maxHealth: 5
-  speed: 3
+  maxHealth: 10
+  speed: 5
   modelPrefab: {fileID: 0}
   damage: 2
   maxTotalHealth: 50

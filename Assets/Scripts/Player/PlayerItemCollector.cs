@@ -5,50 +5,102 @@ public class PlayerItemCollector : NetworkBehaviour
 {
     private PlayerInventory _playerInventory;
 
-    void Start()
+    private void Start()
     {
         _playerInventory = GetComponent<PlayerInventory>();
+        
         if (_playerInventory == null)
-            Debug.LogError("PlayerInventoryController not found on this player!");
+        {
+            Debug.LogError("[ItemCollector] PlayerInventory component not found on player!");
+        }
+        else
+        {
+            Debug.Log("[ItemCollector] PlayerInventory found and ready");
+        }
     }
 
     private void OnTriggerEnter2D(Collider2D collision)
     {
-        // Local client detects the collision
+        if (!collision.CompareTag("Item")) return;
         if (!IsOwner) return;
 
-        if (collision.CompareTag("Item"))
+        Item item = collision.GetComponent<Item>();
+        if (item == null || item.Preset == null)
         {
-            Item item = collision.GetComponent<Item>();
-            if (item == null || item.NetworkObject == null) return;
+            Debug.LogWarning("[ItemCollector] Invalid item!");
+            return;
+        }
 
-            Debug.Log($"[Client] Attempting to pick up: {item.itemName}");
+        Debug.Log($"[ItemCollector] Attempting to pick up: {item.itemName}");
+
+        // Check if item is networked
+        bool isNetworkedItem = item.NetworkObject != null && item.NetworkObject.IsSpawned;
+        
+        if (isNetworkedItem)
+        {
             RequestPickupServerRpc(item.NetworkObjectId);
+        }
+        else
+        {
+            PickUpItemLocal(item);
+        }
+    }
+
+    private void PickUpItemLocal(Item item)
+    {
+        if (_playerInventory == null)
+        {
+            Debug.LogError("[ItemCollector] PlayerInventory is null!");
+            return;
+        }
+
+        bool added = _playerInventory.TryAddItem(item.Preset, item.quantity);
+        Debug.Log($"[ItemCollector] Local pickup result: {added}");
+        
+        if (added)
+        {
+            Destroy(item.gameObject);
         }
     }
 
     [ServerRpc(RequireOwnership = false)]
     private void RequestPickupServerRpc(ulong itemNetworkId, ServerRpcParams rpcParams = default)
     {
-        if (!NetworkManager.SpawnManager.SpawnedObjects.TryGetValue(itemNetworkId, out NetworkObject itemNetObj))
+        ulong senderClientId = rpcParams.Receive.SenderClientId;
+        Debug.Log($"[Server] Pickup request from client {senderClientId} for item {itemNetworkId}");
+
+        if (!NetworkManager.SpawnManager.SpawnedObjects.TryGetValue(itemNetworkId, out var itemNetObj))
+        {
+            Debug.LogWarning($"[Server] Item {itemNetworkId} not found in spawn manager");
             return;
+        }
 
         var item = itemNetObj.GetComponent<Item>();
-        if (item == null) return;
-
-        // Find the player who sent the request
-        ulong senderClientId = rpcParams.Receive.SenderClientId;
-        var playerObject = NetworkManager.ConnectedClients[senderClientId].PlayerObject;
-        var playerInventory = playerObject.GetComponent<PlayerInventory>();
-
-        if (playerInventory != null)
+        if (item == null)
         {
-            Debug.Log($"[Server] Player {senderClientId} picking up {item.itemName}");
-            playerInventory.TryAddItem(item.Preset, item.quantity);
+            Debug.LogWarning("[Server] NetworkObject has no Item component");
+            return;
+        }
 
-            // Despawn the item on the server (propagates to all clients)
-            if (itemNetObj.IsSpawned)
-                itemNetObj.Despawn(true);
+        if (!NetworkManager.ConnectedClients.TryGetValue(senderClientId, out var clientData))
+        {
+            Debug.LogWarning($"[Server] Client {senderClientId} not found");
+            return;
+        }
+
+        var playerInventory = clientData.PlayerObject.GetComponent<PlayerInventory>();
+        if (playerInventory == null)
+        {
+            Debug.LogWarning($"[Server] No PlayerInventory on client {senderClientId}'s player");
+            return;
+        }
+
+        bool added = playerInventory.TryAddItem(item.Preset, item.quantity);
+        Debug.Log($"[Server] Added to inventory: {added}");
+
+        if (added && itemNetObj.IsSpawned)
+        {
+            itemNetObj.Despawn(true);
         }
     }
 }

@@ -41,10 +41,10 @@ public class PlayerStats : NetworkBehaviour, IDamageable
                 _currentHealth = 0;
                 OnPlayerDied?.Invoke(this); // fire event
                 
-                if (IsServer && TurnManager.Instance != null)
-                {
-                    TurnManager.Instance.EndTurn();
-                }
+                // if (IsServer && TurnManager.Instance != null)
+                // {
+                //     TurnManager.Instance.EndTurn();
+                // }
             }
         }
         get { return _currentHealth; }
@@ -63,6 +63,8 @@ public class PlayerStats : NetworkBehaviour, IDamageable
             rb.simulated = false;
             physicsCollider.enabled = value;
         } }
+
+    public bool Invincible { get; set; }
 
     // -------------------------------
     public float MaxHealth => maxHealth;

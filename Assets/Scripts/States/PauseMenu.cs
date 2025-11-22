@@ -1,25 +1,17 @@
-using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.InputSystem;
-using Unity.Netcode;
 
-public class PauseMenu : NetworkBehaviour
+public class PauseMenu : MonoBehaviour
 {
-    private NetworkVariable<bool> isGamePaused = new NetworkVariable<bool>(
-        false, 
-        NetworkVariableReadPermission.Everyone, 
-        NetworkVariableWritePermission.Server
-    );
-    
-    // Add static reference
     public static PauseMenu Instance { get; private set; }
-    
+
     public GameObject pauseMenuUI;
+    private bool isGamePaused = false;
 
     private void Awake()
     {
-        // Set up singleton
+        // Singleton setup
         if (Instance == null)
         {
             Instance = this;
@@ -30,106 +22,54 @@ public class PauseMenu : NetworkBehaviour
         }
     }
 
-    void Start()
+    private void Start()
     {
-        pauseMenuUI.SetActive(false);
+        if (pauseMenuUI != null)
+            pauseMenuUI.SetActive(false);
     }
 
-    // Add static method to check pause state
     public static bool IsGamePaused()
     {
-        return Instance != null && Instance.isGamePaused.Value;
+        return Instance != null && Instance.isGamePaused;
     }
 
-    public override void OnNetworkSpawn()
+    private void Update()
     {
-        base.OnNetworkSpawn();
-        
-        // Subscribe to pause state changes
-        isGamePaused.OnValueChanged += OnPauseStateChanged;
-        
-        // Apply current state for late joiners
-        OnPauseStateChanged(false, isGamePaused.Value);
-    }
-
-    public override void OnNetworkDespawn()
-    {
-        base.OnNetworkDespawn();
-        isGamePaused.OnValueChanged -= OnPauseStateChanged;
-    }
-
-    void Update()
-    {
-        // Add null check for Keyboard.current
         if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
         {
-            if (IsServer || IsHost)
-            {
-                TogglePause();
-            }
-            else
-            {
-                // Client requests pause from server
-                RequestPauseServerRpc();
-            }
+            TogglePause();
         }
-    }
-
-    [ServerRpc(RequireOwnership = false)]
-    private void RequestPauseServerRpc()
-    {
-        TogglePause();
     }
 
     private void TogglePause()
     {
-        if (!IsServer) return;
-        
-        isGamePaused.Value = !isGamePaused.Value;
-    }
+        isGamePaused = !isGamePaused;
 
-    private void OnPauseStateChanged(bool oldValue, bool newValue)
-    {
-        if (newValue)
-        {
+        if (isGamePaused)
             PauseGame();
-        }
         else
-        {
             ResumeGame();
-        }
     }
 
     private void PauseGame()
     {
-        pauseMenuUI.SetActive(true);
-        
-        // DON'T use Time.timeScale = 0 in multiplayer!
-        // Instead, disable gameplay components
+        if (pauseMenuUI != null)
+            pauseMenuUI.SetActive(true);
+
         SetGameplayEnabled(false);
     }
 
     public void Resume()
     {
-        if (IsServer || IsHost)
-        {
-            isGamePaused.Value = false;
-        }
-        else
-        {
-            ResumeServerRpc();
-        }
-    }
-
-    [ServerRpc(RequireOwnership = false)]
-    private void ResumeServerRpc()
-    {
-        isGamePaused.Value = false;
+        isGamePaused = false;
+        ResumeGame();
     }
 
     private void ResumeGame()
     {
-        pauseMenuUI.SetActive(false);
+        if (pauseMenuUI != null)
+            pauseMenuUI.SetActive(false);
+
         SetGameplayEnabled(true);
     }
 
@@ -142,36 +82,19 @@ public class PauseMenu : NetworkBehaviour
             controller.enabled = enabled;
         }
 
-        // // Disable/enable enemy AI
+        // Disable/enable enemy AI if needed
         // var enemies = FindObjectsOfType<EnemyAI>();
         // foreach (var enemy in enemies)
-        // {
         //     enemy.enabled = enabled;
-        // }
-        //
-        // // Add other gameplay components as needed
     }
 
     public void LoadMenu()
     {
-        Debug.Log("Load menu");
-        
-        if (IsServer)
-        {
-            NetworkManager.Singleton.Shutdown();
-            SceneManager.LoadScene("StartScene");
-        }
+        SceneManager.LoadScene("MainMenuScene");
     }
 
     public void QuitGame()
     {
-        Debug.Log("Quit game");
-        
-        if (IsServer)
-        {
-            NetworkManager.Singleton.Shutdown();
-        }
-        
         #if UNITY_EDITOR
             UnityEditor.EditorApplication.isPlaying = false;
         #else

@@ -1,193 +1,262 @@
 using Unity.Netcode;
 using UnityEngine;
+using Unity.Collections;
 
 public class InventoryController : NetworkBehaviour
 {
+    [Header("UI References")]
     public GameObject inventoryPanel;
     public GameObject slotPrefab;
     public int slotCount;
-    
-    public static InventoryController Instance { get; private set; }
-    protected NetworkList<InventoryItemData> networkInventory = new NetworkList<InventoryItemData>();
 
+    [Header("Testing")]
     [SerializeField] private ItemPreset testItem;
-    
-    private bool isInitialized = false;
 
-    private void Awake()
+    protected NetworkList<InventoryItemData> networkInventory;
+    protected bool isInitialized = false;
+
+    protected virtual void Awake()
     {
-        // // Set up singleton instance
-        // if (Instance == null)
-        // {
-        //     Instance = this;
-        //     Debug.Log("[InventoryController] Instance set in Awake");
-        // }
-        // else
-        // {
-        //     Debug.LogWarning("[InventoryController] Duplicate InventoryController detected! Destroying this one.");
-        //     Destroy(gameObject);
-        // }
+        // Initialize NetworkList in Awake
+        if (networkInventory == null)
+        {
+            networkInventory = new NetworkList<InventoryItemData>();
+        }
     }
 
     [ContextMenu("Add test item")]
     private void AddTestItem()
     {
-        TryAddItem(testItem, 1);
+        if (testItem != null)
+        {
+            TryAddItem(testItem, 1);
+        }
     }
 
     public override void OnNetworkSpawn()
     {
-        // Check if UI is already ready
-        if (UIManager.Instance != null && UIManager.Instance.InventoryPage != null)
+        base.OnNetworkSpawn();
+        
+        Debug.Log($"[InventoryController] OnNetworkSpawn - IsServer: {IsServer}, IsOwner: {IsOwner}");
+        
+        // Only initialize UI for the owner (local player)
+        if (IsOwner)
         {
-            InitializeInventory();
-        }
-        else
-        {
-            // Subscribe to UI ready event
-            UIManager.OnUIReady += InitializeInventory;
+            // Check if UIManager is ready
+            if (UIManager.Instance != null && UIManager.Instance.InventoryPage != null)
+            {
+                InitializeInventory();
+            }
+            else
+            {
+                // Wait for UIManager to be ready
+                Debug.Log("[InventoryController] Waiting for UIManager...");
+                UIManager.OnUIReady += InitializeInventory;
+            }
         }
     }
 
-    private void InitializeInventory()
+    protected virtual void InitializeInventory()
     {
-        inventoryPanel = UIManager.Instance?.InventoryPage;
+        if (UIManager.Instance == null)
+        {
+            Debug.LogError("[InventoryController] UIManager.Instance is null!");
+            return;
+        }
+
+        inventoryPanel = UIManager.Instance.InventoryPage;
         
         if (inventoryPanel == null)
         {
-            Debug.LogError("[InventoryController] Could not find Inventory UI panel!");
+            Debug.LogError("[InventoryController] InventoryPage not assigned in UIManager!");
             return;
         }
 
         isInitialized = true;
-        Debug.Log("[InventoryController] Inventory initialized successfully!");
+        Debug.Log("[InventoryController] Inventory UI initialized successfully!");
         
-        // Unsubscribe to prevent multiple calls
+        // Unsubscribe from the event
         UIManager.OnUIReady -= InitializeInventory;
-        
-        // Call any additional initialization here if needed
-        // InitializeInventoryUI();
     }
 
-    public override void OnNetworkDespawn()
-    {
-        // Clean up subscription when despawning
-        UIManager.OnUIReady -= InitializeInventory;
-        
-        // Clear singleton if this is the instance
-        if (Instance == this)
-        {
-            Instance = null;
-            Debug.Log("[InventoryController] Instance cleared in OnNetworkDespawn");
-        }
-    }
-
-    private void OnDestroy()
-    {
-        // Additional cleanup in case OnNetworkDespawn doesn't fire
-        UIManager.OnUIReady -= InitializeInventory;
-        
-        // Clear singleton if this is the instance
-        if (Instance == this)
-        {
-            Instance = null;
-            Debug.Log("[InventoryController] Instance cleared in OnDestroy");
-        }
-    }
-
-    public GameObject[] itemPrefabs;
-
-    public bool TryAddItem(ItemPreset preset, int quantity)
+    public virtual bool TryAddItem(ItemPreset preset, int quantity)
     {
         if (preset == null)
-            return false;
-
-        // Safety check - wait for initialization
-        if (!isInitialized)
         {
-            Debug.LogWarning("[InventoryController] Inventory not yet initialized, cannot add item");
+            Debug.LogWarning("[InventoryController] Preset is null!");
             return false;
         }
+
+        Debug.Log($"[InventoryController] TryAddItem: {preset.itemName} x{quantity}, IsServer: {IsServer}, IsOwner: {IsOwner}");
 
         string itemID = preset.itemID;
 
-        if (TryStack(itemID, quantity))
+        // Add directly if we're the server/host
+        if (IsServer)
         {
+            bool added = TryStack(itemID, quantity) || TryAddNewItem(itemID, quantity);
+            
+            if (added)
+            {
+                OnItemAdded(itemID, quantity);
+            }
+            
+            return added;
+        }
+        // Client needs to request from server
+        else if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        {
+            AddItemServerRpc(itemID, quantity);
             return true;
         }
-
-        return TryAddNewItem(itemID, quantity);
+        // Single player fallback
+        else
+        {
+            Debug.LogWarning("[InventoryController] Not connected, adding locally");
+            bool added = TryStack(itemID, quantity) || TryAddNewItem(itemID, quantity);
+            if (added)
+            {
+                OnItemAdded(itemID, quantity);
+            }
+            return added;
+        }
     }
 
-    private bool TryStack(string itemID, int quantity)
+    protected virtual void OnItemAdded(string itemID, int quantity)
     {
+        Debug.Log($"[InventoryController] Item added: {itemID} x{quantity}");
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void AddItemServerRpc(string itemID, int quantity)
+    {
+        if (ItemDatabase.itemDatabaseInstance != null && 
+            ItemDatabase.itemDatabaseInstance.TryGetItem(itemID, out var preset))
+        {
+            TryAddItem(preset, quantity);
+        }
+        else
+        {
+            Debug.LogWarning($"[InventoryController] ItemPreset not found for ID: {itemID}");
+        }
+    }
+
+    protected bool TryStack(string itemID, int quantity)
+    {
+        // ✅ Convert to FixedString64Bytes for comparison
+        FixedString64Bytes fixedItemId = itemID;
+        
         for (int i = 0; i < networkInventory.Count; i++)
         {
             var inventoryItem = networkInventory[i];
-            if (inventoryItem.itemId.ToString() != itemID)
-                continue;
+            
+            // ✅ Compare FixedString64Bytes to FixedString64Bytes
+            if (inventoryItem.itemId != fixedItemId) continue;
 
             inventoryItem.quantity += quantity;
             networkInventory[i] = inventoryItem;
-            Debug.Log($"Stacked {quantity}x {itemID}. New quantity: {inventoryItem.quantity}");
+            Debug.Log($"[InventoryController] Stacked {quantity}x {itemID}. New quantity: {inventoryItem.quantity}");
             return true;
         }
-        return false; // Not an error - just means no stack was found
+        return false;
     }
 
-    private bool TryAddNewItem(string itemID, int quantity)
+    protected bool TryAddNewItem(string itemID, int quantity)
     {
         networkInventory.Add(new InventoryItemData
         {
-            itemId = itemID,
+            itemId = itemID, // Implicit conversion from string to FixedString64Bytes
             quantity = quantity
         });
-        Debug.Log($"Added new item: {itemID} x{quantity}");
+        Debug.Log($"[InventoryController] Added new item: {itemID} x{quantity}");
         return true;
     }
-    
+
     public bool HasItem(string itemID, int requiredAmount)
     {
+        // ✅ Convert to FixedString64Bytes for comparison
+        FixedString64Bytes fixedItemId = itemID;
+        
         foreach (var item in networkInventory)
         {
-            if (item.itemId == itemID && item.quantity >= requiredAmount)
+            if (item.itemId == fixedItemId && item.quantity >= requiredAmount)
                 return true;
         }
         return false;
     }
-    
+
     public int GetItemCount(string itemID)
     {
+        // ✅ Convert to FixedString64Bytes for comparison
+        FixedString64Bytes fixedItemId = itemID;
+        
         foreach (var item in networkInventory)
         {
-            if (item.itemId == itemID)
+            if (item.itemId == fixedItemId)
                 return item.quantity;
         }
         return 0;
     }
     
+
+    public virtual void RemoveItem(string itemID, int quantity)
+    {
+        if (IsServer)
+        {
+            RemoveItemInternal(itemID, quantity);
+        }
+        else if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
+        {
+            RemoveItemServerRpc(itemID, quantity);
+        }
+        else
+        {
+            RemoveItemInternal(itemID, quantity);
+        }
+    }
+
     [ServerRpc(RequireOwnership = false)]
     public void RemoveItemServerRpc(string itemID, int amount)
     {
+        RemoveItemInternal(itemID, amount);
+    }
+
+    protected void RemoveItemInternal(string itemID, int amount)
+    {
+        // ✅ Convert to FixedString64Bytes
+        FixedString64Bytes fixedItemId = itemID;
+        
         for (int i = 0; i < networkInventory.Count; i++)
         {
             var entry = networkInventory[i];
-
-            if (entry.itemId != itemID)
-                continue;
+            
+            // ✅ Compare FixedString64Bytes to FixedString64Bytes
+            if (entry.itemId != fixedItemId) continue;
 
             entry.quantity -= amount;
             if (entry.quantity <= 0)
-            {
                 networkInventory.RemoveAt(i);
-            }
             else
-            {
                 networkInventory[i] = entry;
-            }
 
+            Debug.Log($"[InventoryController] Removed {amount}x {itemID}. Remaining: {entry.quantity}");
+            
+            OnItemRemoved(itemID, amount);
             break;
         }
+    }
+
+    protected virtual void OnItemRemoved(string itemID, int quantity)
+    {
+        // Override in child classes
+    }
+
+    public override void OnNetworkDespawn()
+    {
+        // Unsubscribe if still subscribed
+        UIManager.OnUIReady -= InitializeInventory;
+        
+        base.OnNetworkDespawn();
     }
 }
 
@@ -296,12 +365,12 @@ public class InventoryController : NetworkBehaviour
 //         for (int i = 0; i < networkInventory.Count; i++)
 //         {
 //             var inventoryItem = networkInventory[i];
-//             if (inventoryItem.itemId.ToString() != itemID)
+//             if (inventoryitem.itemID.ToString().ToString() != itemID)
 //                 continue;
 //
 //             inventoryItem.quantity += quantity;
 //             networkInventory[i] = inventoryItem;
-//             Debug.Log($"Added {inventoryItem.itemId.ToString()} to inventory as a stack");
+//             Debug.Log($"Added {inventoryitem.itemID.ToString().ToString()} to inventory as a stack");
 //             return true;
 //         }
 //         Debug.LogError($"Failed to add {itemID} to inventory");

@@ -67,7 +67,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: 0, y: -1.31}
+  m_Offset: {x: -0.47, y: -0.53}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0, y: 0}
@@ -77,7 +77,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 1.15, y: 1.19}
+  m_Size: {x: 2.06, y: 1.95}
   m_EdgeRadius: 0
 --- !u!114 &3100325287411005287
 MonoBehaviour:
@@ -106,6 +106,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4962638248742657236}
   - component: {fileID: 1348107493800750212}
+  - component: {fileID: -1245590291670957505}
   - component: {fileID: 2073239611029943469}
   - component: {fileID: 6231677608690584779}
   - component: {fileID: 5569836775364479048}
@@ -121,6 +122,7 @@ GameObject:
   - component: {fileID: -6637598952527581463}
   - component: {fileID: -8443809409615973882}
   - component: {fileID: -5765475761744878367}
+  - component: {fileID: 3334157541419686718}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -136,8 +138,8 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4184021109847334850}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -1.13, y: -3, z: 0}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 1.5685296, y: 24.33752, z: 0}
   m_LocalScale: {x: 1.5, y: 1.5, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -204,6 +206,19 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &-1245590291670957505
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4184021109847334850}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2cbb6c627ba7744ca8125b24d919ef5d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnstuckPlayer
+  playerTransform: {fileID: 4962638248742657236}
 --- !u!114 &2073239611029943469
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -458,7 +473,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: 0, y: 0}
+  m_Offset: {x: -0.018115252, y: 0.00708054}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0.5, y: 0.5}
@@ -468,7 +483,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 1, y: 1}
+  m_Size: {x: 0.9198157, y: 0.99227643}
   m_EdgeRadius: 0
 --- !u!50 &4935522041363637472
 Rigidbody2D:
@@ -514,7 +529,6 @@ MonoBehaviour:
   slotPrefab: {fileID: 3637350540548519457, guid: 77c72581a528b4e59a2eb69a13719dfe, type: 3}
   slotCount: 20
   testItem: {fileID: 0}
-  itemPrefabs: []
 --- !u!114 &-1989707414044192976
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -653,8 +667,20 @@ MonoBehaviour:
   slotPrefab: {fileID: 4173788567760381060, guid: 59d0a3526cbd54495a0072cca8fac371, type: 3}
   slotCount: 20
   testItem: {fileID: 11400000, guid: 4be03e2026a0749b0b9a6b214de6be02, type: 2}
-  itemPrefabs: []
   viewName: PlayerInventory
+--- !u!114 &3334157541419686718
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4184021109847334850}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2cbb6c627ba7744ca8125b24d919ef5d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnstuckPlayer
+  playerTransform: {fileID: 4962638248742657236}
 --- !u!1 &5221017111132069347
 GameObject:
   m_ObjectHideFlags: 0
